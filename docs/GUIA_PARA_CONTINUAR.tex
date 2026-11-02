@@ -1,0 +1,209 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+\newcommand{\HS}{\mathrm{HS}}
+\newcommand{\LS}{\mathrm{LS}}
+\newcommand{\Dq}{Dq}
+\newcommand{\kb}{k_{\mathrm{B}}}
+
+\title{\bfseries Guía para arreglar \texttt{sco0} y crear la base para continuar}
+\author{Alejandro Rodríguez}
+\date{Noviembre 2026}
+
+\begin{document}
+\maketitle
+
+\begin{quote}
+\emph{Evalúa lo que generó Gemini (\texttt{sco0/}), dice qué conservar y qué
+reemplazar, y especifica el modelo objetivo para retomar el doctorado.
+Complementa a la ``Memoria del proyecto original''.}
+\end{quote}
+
+\tableofcontents
+
+\section{Diagnóstico de \texttt{sco0}}
+
+\subsection{Lo que está bien (conservar)}
+
+\begin{itemize}
+\item \textbf{Estructura limpia y modular}: \texttt{config.py}, \texttt{model.py},
+  \texttt{equilibrium.py}, \texttt{monte\_carlo.py}, \texttt{protocol.py},
+  \texttt{output.py}.
+\item \textbf{Reproducibilidad}: semilla fija, \texttt{numpy.random.SeedSequence}.
+\item \textbf{Configuración declarativa} en JSON con validación estricta.
+\item \textbf{Referencia cuasiestática} con \texttt{scipy.optimize}.
+\item \textbf{Tests} y \textbf{salidas CSV/PNG} automatizadas.
+\item \textbf{Honestidad documental}: deja claro qué \emph{no} modela.
+\end{itemize}
+
+\subsection{Lo que perdió (el problema real)}
+
+\begin{center}
+\begin{tabular}{p{4.6cm}p{4.6cm}p{4.6cm}}
+\toprule
+Aspecto & Tu modelo original & \texttt{sco0} (Gemini) \\
+\midrule
+Temperatura & Metropolis a $T$ finita (Boltzmann) & 0 K (descenso cuesta abajo) \\
+Espín & Se propone y se acepta con $e^{-\Delta E/\kb T}$ & Nunca se propone; se recalcula como suelo \\
+N.\ de centros & 1 (\texttt{prueba}) y red $N^3$ (\texttt{project\_sco}) & 1--2 \\
+Cooperatividad & Red elástica + intercambio ($j_{\mathrm{isin}}$) & Solo puente $K_{\mathrm{bridge}}$ entre 2 Fe \\
+Energía electrónica & \textbf{Ligand-field $\Dq$} (Tanabe--Sugano linealizado) & ``Potencial de Jørgensen'' ad hoc \\
+Histéresis & Objetivo (ciclo térmico) & Bucle a 0 K = atrapamiento \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Conclusión:} Gemini escribió un código limpio pero \emph{no es tu
+modelo}: es una optimización de geometría a 0 K con un potencial inventado. Hay
+que \textbf{conservar la estructura} y \textbf{reemplazar la física}.
+
+\subsection{Lo que está mal en \texttt{sco0}}
+
+\begin{enumerate}
+\item \textbf{0 K como ``Monte Carlo''.} \texttt{monte\_carlo.py} acepta solo
+  $E_{\mathrm{trial}}\le E_{\mathrm{old}}$; no hay Boltzmann.
+\item \textbf{El espín es esclavo de la geometría.} \texttt{ground\_state()} elige
+  $\HS$/$\LS$ por mínimo a geometría fija; no hay variable de espín muestreada.
+\item \textbf{``Temperatura nominal'' sin sentido físico.} $T$ es una etiqueta,
+  nunca entra en $\kb T$.
+\item \textbf{El ``potencial de Jørgensen'' no es tu modelo.}
+  $E = E_{\mathrm{scale}}\bigl(\tfrac{1}{9x^9} - 0.02\,\rho\,\ell/x^5 - 1/x\bigr)+P_s$
+  es una Lennard-Jones modificada, no el cruce $-4\Dq$ vs $-24\Dq+P$.
+\item \textbf{Unidades poco físicas} ($P_{\LS}=3.9$ eV, $E_{\mathrm{scale}}=15$ eV).
+\end{enumerate}
+
+\section{El modelo objetivo (la base a construir)}
+
+Unifica las tres versiones previas. La idea central (de la tesis y de
+\texttt{prueba/main.cpp}):
+
+\begin{quote}
+\emph{La temperatura contrae la red $\to$ sube el campo de ligandos $\Dq$ $\to$
+cruza $\HS$/$\LS$.}
+\end{quote}
+
+\subsection{Energía de un centro (campo de ligandos, versión corregida)}
+
+Sea $r$ la distancia Fe--N. El campo de ligandos decae con la distancia (modelo
+de cargas puntuales, $10\Dq\propto r^{-5}$):
+\begin{equation}
+\Dq(r) = \Dq_0\,\bigl(r_0/r\bigr)^5 .
+\end{equation}
+
+Energía electrónica de cada estado (linealización de Tanabe--Sugano):
+\begin{align}
+E_{\mathrm{el}}(r,\HS) &= -4\,\Dq(r)\\
+E_{\mathrm{el}}(r,\LS) &= -24\,\Dq(r) + P
+\end{align}
+
+El cruce está en $\Dq(r_c)=P/20$, es decir $r_c = r_0\,(20\Dq_0/P)^{1/5}$.
+Eligiendo $P$ para que $r_c$ quede entre $r_{\HS}$ y $r_{\LS}$ se obtiene enlace
+\emph{largo en $\HS$} y \emph{corto en $\LS$} (la contracción de red). Unidades:
+cm$^{-1}$ + K con $\kb=0.695$ cm$^{-1}$/K (o eV con $\kb=8.617\times10^{-5}$ eV/K).
+Valores de referencia (Fe$^{2+}$): $\Dq_0\approx 1200$--$2000$ cm$^{-1}$ en
+$r_0\approx 2.0$ Å, $B\approx 917$--$1050$ cm$^{-1}$, $C\approx 4B$,
+$P\approx 20000$--$25000$ cm$^{-1}$ (ajustable).
+
+\subsection{Acoplamiento elástico (cooperatividad)}
+
+Para $N$ centros, resorte entre vecinos (recupera \texttt{project\_sco}):
+\begin{equation}
+E_{\mathrm{elast}} = \frac{K}{2}\sum_{(i,j)}\bigl(r_{ij}-(r_i+r_j)\bigr)^2 ,
+\end{equation}
+o, para empezar, un acoplamiento al promedio de la red (campo medio elástico):
+\begin{equation}
+E_{\mathrm{lat}} = \frac{K_{\mathrm{red}}}{2}\sum_i\bigl(r_i - R_{\mathrm{lat}}\bigr)^2 .
+\end{equation}
+El término de intercambio $-J\sum_{(i,j)}\sigma_i\sigma_j$ (opcional) añade otra
+vía de cooperatividad.
+
+\subsection{Metropolis a temperatura finita (lo que falta)}
+
+Por cada paso MC, \textbf{proponer} (i) voltear el espín de un centro y/o (ii)
+mover una distancia, calcular $\Delta E$ \emph{una sola vez}, y aceptar con
+\begin{equation}
+p = \min\!\bigl(1,\ e^{-\Delta E/\kb T}\bigr) .
+\end{equation}
+
+Solo así se recupera el ensemble térmico y, con un ciclo $T$, la
+\textbf{histéresis} cooperativa.
+
+\subsection{Protocolo (ciclo térmico real)}
+
+Barrido de temperatura $T$ (no ``nominal''), con la red libre (NPT) o fija (NVT),
+en dos direcciones $\Rightarrow$ fracción $\HS$ vs $T$ con lazo.
+
+\section{Hoja de ruta en fases}
+
+\begin{description}
+\item[Fase 0 -- Unidades y constantes.] Crear \texttt{sco0/constants.py} con
+  $\kb$, $B$, $C$, $Dq_0$, etc.; fijar una sola unidad (cm$^{-1}$ + K).
+\item[Fase 1 -- Un centro, $T$ finita.] Reescribir
+  \texttt{model.py::electronic\_energy} con la energía de campo de ligandos;
+  añadir \texttt{sco0/metropolis.py} con propuesta de espín + Boltzmann.
+  Objetivo: cruce térmico \emph{suave} (sin escalón), validar contra
+  \texttt{prueba/main.cpp} (pero con $\kb$ y $\Dq$ correctos).
+\item[Fase 2 -- Cooperatividad.] $N$ centros (1D $\to$ 2D/3D), resorte entre
+  vecinos, Metropolis conjunto (espín + posición + volumen). Objetivo: transición
+  de primer orden y lazo de histéresis.
+\item[Fase 3 -- Ciclo térmico y validación.] Calentar/enfriar, fracción $\HS$ vs
+  $T$, ancho de histéresis; comparar con los datos experimentales
+  (\texttt{~/Dropbox/PhD/2018/Semestre-I/SCO\_DATA/}).
+\item[Fase 4 (opcional) -- Refinamiento.] Tabla completa de Tanabe--Sugano
+  interpolada en $\Dq/B$, o parámetros de DFT (Paulsen--Trautwein 2004).
+\end{description}
+
+\section{Qué tocar en el código (mapa concreto)}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Archivo & Acción \\
+\midrule
+\texttt{sco0/config.py} & Conservar; añadir $N$, $\Dq_0$, $r_0$, $P$, $B$, $J$, $K$, $T$ (rango/paso), $\kb$ \\
+\texttt{sco0/model.py} & Reescribir \texttt{electronic\_energy} / \texttt{ground\_state} \\
+\texttt{sco0/metropolis.py} & \textbf{Nuevo}: espín + posición, $e^{-\Delta E/\kb T}$ \\
+\texttt{sco0/monte\_carlo.py} & Reemplazar el descenso 0 K por Metropolis térmico \\
+\texttt{sco0/equilibrium.py} & Conservar (adaptada a la nueva energía) \\
+\texttt{sco0/protocol.py} & Reescribir como ciclo de $T$ real \\
+\texttt{sco0/output.py} & Conservar; añadir curva $\HS$ vs $T$ (ambos sentidos) \\
+\texttt{sco0/constants.py} & \textbf{Nuevo}: constantes físicas y de Racah \\
+\texttt{tests/} & Ampliar: Boltzmann, cruce, histéresis \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Criterios de ``hecho'' (verificables)}
+
+\begin{enumerate}
+\item \texttt{python -m unittest discover -s tests -v} en verde.
+\item Un centro a $T$ finita da fracción $\HS$ \textbf{suave} en $T$.
+\item $N$ centros muestran \textbf{histéresis} (lazo en el ciclo), no atrapamiento.
+\item Parámetros ($\Dq$, $B$, $P$, $K$, $J$) con unidades físicas documentadas.
+\item \texttt{results/} regenerable con semilla fija.
+\end{enumerate}
+
+\section{Referencia rápida de fórmulas}
+
+\begin{align}
+\Dq(r) &= \Dq_0\,(r_0/r)^5\\
+E_{\HS} &= -4\,\Dq(r)\\
+E_{\LS} &= -24\,\Dq(r) + P\\
+E_{\mathrm{elast}} &= \frac{K}{2}\sum_{(i,j)}(r_{ij}-r_i-r_j)^2\\
+E_{\mathrm{total}} &= \sum_i E_{\mathrm{el}} + E_{\mathrm{elast}} \quad \bigl(+\text{opcional } -J\sum\sigma_i\sigma_j\bigr)\\
+p_{\mathrm{aceptación}} &= \min\!\bigl(1,\ e^{-\Delta E/\kb T}\bigr)
+\end{align}
+
+Bibliografía: \texttt{referencias/README.md}.
+
+\end{document}

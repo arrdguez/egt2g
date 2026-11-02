@@ -3,7 +3,21 @@
 __pycache__/
 *.py[cod]
 results/
-*.pdf
 /*.png
 /*.md
 !/README.md
+
+# Artefactos LaTeX
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.nav
+*.snm

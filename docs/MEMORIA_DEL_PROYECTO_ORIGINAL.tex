@@ -1,0 +1,282 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+\newcommand{\HS}{\mathrm{HS}}
+\newcommand{\LS}{\mathrm{LS}}
+\newcommand{\Dq}{Dq}
+\newcommand{\kb}{k_{\mathrm{B}}}
+
+\title{\bfseries Memoria del proyecto original\\[2mm]\large Transición de espín (SCO) en Fe(II)}
+\author{Alejandro Rodríguez}
+\date{Noviembre 2026}
+
+\begin{document}
+\maketitle
+
+\begin{quote}
+\emph{Documento de reconstrucción personal.} Objetivo: refrescar la memoria de
+\emph{qué} se quería hacer, \emph{cómo} se intentó (los códigos originales) y
+\emph{qué falló}, para retomar el doctorado con una base sólida. Todo lo que se
+afirma de cada código está verificado contra el fuente en \texttt{~/Dropbox/src/}.
+\end{quote}
+
+\tableofcontents
+
+\section{Resumen ejecutivo}
+
+\begin{itemize}
+\item El proyecto modela la \textbf{transición de espín (SCO)} de Fe(II) en
+  sólidos tipo $\mathrm{Fe(py)_2[Ni(CN)_4]}$ (clatrata de Hofmann / análogos de
+  azul de Prusia), donde el Fe pasa de \textbf{alto espín} ($\HS$, $S=2$) a
+  \textbf{bajo espín} ($\LS$, $S=0$) al bajar la temperatura, con
+  \textbf{histéresis} (efecto cooperativo).
+\item El mecanismo microscópico es de \textbf{campo de ligandos}: el
+  desdoblamiento octaédrico $\Delta_o = 10\,\Dq$ decide si los electrones ocupan
+  los orbitales antienlazantes $e_g$ ($\HS$, enlace largo) o solo los $t_{2g}$
+  ($\LS$, enlace corto).
+\item Se escribieron \textbf{cinco códigos} (2016--2019) en dos filosofías:
+  (1) \emph{modelo de red elástica/Ising} (\texttt{project\_sco}, \texttt{one\_D})
+  y (2) \emph{modelo de un centro con $\Dq$} (\texttt{prueba}).
+\item El código que se recordaba ("un centro, $\Dq$ y los parámetros $A,B$") es
+  \texttt{src/prueba/main.cpp}, basado en el \emph{review} de Levchenko et al.\ (2014).
+\item Problema transversal a todos: \textbf{unidades} ($\Dq$ vs $\Delta_o$, $\kb$
+  en cm$^{-1}$) y varios bugs menores.
+\end{itemize}
+
+\section{Contexto y objetivo original}
+
+\textbf{Doctorado (2016--2019).} La parte experimental consistió en sintetizar y
+medir complejos de Fe(II) con piridinas sustituidas ($3{,}5$-FBrPy,
+$3{,}5$-ClFPy, $2$-FPy, \dots) y caracterizarlos magnéticamente (ZFCFC, $M$ vs $H$,
+susceptibilidad AC) y espectroscópicamente (Raman/IR). La parte teórica (los
+códigos) buscaba un modelo mínimo que reprodujera la \textbf{curva de conversión
+$\HS\to\LS$ en función de la temperatura} y su \textbf{histéresis}.
+
+En la tesis (Cap.~3) se describe así: la transición $\LS\leftrightarrow\HS$ es la
+promoción de electrones de los orbitales $e_g$ (antienlazantes) a los $t_{2g}$
+(no enlazantes); el estímulo térmico induce un cambio del gap $\Dq$ ($\Delta_o$),
+de modo que algunos niveles se vuelven accesibles y otros no. Es decir: la
+temperatura \emph{cambia el campo de ligandos efectivo} $\Dq$ (vía la
+dilatación/contracción de la red), y eso dispara el cruce $\HS\leftrightarrow\LS$.
+
+\section{Fundamentos físicos}
+
+\subsection{El ion $d^6$ en campo octaédrico}
+
+En un entorno octaédrico los 5 orbitales $d$ se desdoblan en dos grupos:
+
+\begin{center}
+\begin{tabular}{lcl}
+$e_g$ (antienlazante) & $+6\,\Dq$ & (2 orbitales) \\
+$t_{2g}$ (no enlazante) & $-4\,\Dq$ & (3 orbitales)
+\end{tabular}
+\end{center}
+
+\begin{itemize}
+\item \textbf{$\HS$} (alto espín, $S=2$, término ${}^5T_{2g}$):
+  configuración $(t_{2g})^4(e_g)^2$. Dos electrones en $e_g$ $\Rightarrow$
+  enlace Fe--N \emph{largo}.
+\item \textbf{$\LS$} (bajo espín, $S=0$, término ${}^1A_{1g}$):
+  configuración $(t_{2g})^6$. Sin electrones en $e_g$ $\Rightarrow$ enlace
+  Fe--N \emph{corto} (contracción de red).
+\end{itemize}
+
+Energía orbital (sin repulsión electrónica):
+\begin{align}
+E(\HS) &= 4\,(-4\Dq) + 2\,(+6\Dq) = -4\,\Dq\\
+E(\LS) &= 6\,(-4\Dq) = -24\,\Dq
+\end{align}
+
+Por eso $\LS$ gana al crecer $\Dq$. Para que $\HS$ sea estable a $\Dq$ pequeño hay
+que añadir la \textbf{energía de apareamiento} $P$ (poner dos electrones en el
+mismo orbital $t_{2g}$ cuesta energía). El cruce ocurre cuando:
+\begin{equation}
+-4\Dq = -24\Dq + P \;\Rightarrow\; 20\,\Dq = P \;\Rightarrow\; \Dq_{\mathrm{cruce}} = P/20 .
+\end{equation}
+
+\subsection{Diagrama de Tanabe--Sugano y parámetros de Racah}
+
+Los niveles reales (con repulsión $e^-$--$e^-$) se expresan en función de
+$\Dq/B$ con los \textbf{parámetros de Racah} $A$, $B$, $C$:
+\begin{itemize}
+\item El término ${}^5T_{2g}$ ($\HS$) es \textbf{independiente} de $B$ y $C$
+  (solo depende de $\Dq$), por eso la recta $-4\Dq$ es exacta.
+\item El término ${}^1A_{1g}$ ($\LS$) sube con $B$ y $C$; su cruce con
+  ${}^5T_{2g}$ ocurre cerca de $\Delta_o \approx 20B$ (para $C/B \approx 4.4$).
+\item Para Fe(II) libre, $B\approx 1058$ cm$^{-1}$ ($\approx 917$ cm$^{-1}$ en
+  complejos) y $C\approx 4B$. El parámetro $A$ es un corrimiento promedio (no
+  afecta las diferencias $\HS$--$\LS$).
+\end{itemize}
+
+En \texttt{prueba/main.cpp} se \textbf{linealizó} esto: $E_{\HS}=-4\Dq$,
+$E_{\LS}=-24\Dq+P$, y se hizo Metropolis en el espacio de $\Dq$.
+
+\subsection{Cooperatividad e histéresis}
+
+En el sólido los centros no son independientes: un centro $\HS$ es más grande y
+deforma la red, favoreciendo que los vecinos también pasen a $\HS$. Esa
+realimentación elástica hace la transición \textbf{cooperativa} y de
+\textbf{primer orden} $\Rightarrow$ aparece un \textbf{lazo de histéresis} al
+calentar y enfriar. \texttt{project\_sco} y \texttt{one\_D} implementan esa
+cooperatividad con resortes entre vecinos; \texttt{prueba} (un centro) no puede
+tenerla.
+
+\section{Cronología de los códigos}
+
+\begin{center}
+\begin{tabular}{lllll}
+\toprule
+Código & Fecha & Lenguaje & Qué hace & Estado \\
+\midrule
+\texttt{DMF.beta.*} & 2016--18 & C++ & Procesado de magnetometría (MvsH, ZFCFC, AC) & Funcional \\
+\texttt{one\_D} & Nov 2018 & C++ & Cadena SCO 1D (40 centros), ciclo térmico & Funciona \\
+\texttt{project\_sco} & Dic 2018 & C++/CMake & Red 3D elástica/Ising, Metropolis + NPT & Incompleto \\
+\textbf{\texttt{prueba}} & \textbf{Mar 2019} & C++ & \textbf{Un centro, $\Dq$ + $B$ (Racah), Metropolis} & Bugs de unidades \\
+\texttt{project\_one} & 2019--20 & C++/Qt & GUI de visualización & Prototipo \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{\texttt{prueba/main.cpp}: el código de un centro ($\Dq$ + $B$)}
+
+Este es el código buscado. Ruta: \texttt{~/Dropbox/src/prueba/main.cpp}
+(git: ``first version'', 18-mar-2019).
+
+\subsection{Qué hace}
+
+Un único átomo \texttt{hierro} con espín booleano \texttt{spin\_b}
+($1=\HS$, $0=\LS$), y una energía $\HS$/$\LS$ \textbf{lineal en $\Dq$}:
+
+\begin{verbatim}
+if (Dq < 22612) {              // campo débil → HS es el suelo
+    Eb  = -4  * Dq;            //  E(HS) = -4 Dq
+    Eex = -24 * Dq + 45224.16; //  E(LS) = -24 Dq + P
+    ...
+} else {                       // campo fuerte → LS es el suelo
+    Eb  = -24 * Dq + 45224.16;
+    Eex = -4  * Dq;
+}
+\end{verbatim}
+
+\textbf{Metropolis a $T$ finita}: propone voltear el espín, calcula $\Delta E$ y
+acepta con
+\begin{equation}
+p_{\omega} = \exp\!\left(-\Delta E/(T \cdot 0.695)\right)
+\end{equation}
+donde $0.695$ es $\kb$ en cm$^{-1}$/K. \textbf{Barrido de $\Dq$} de $21100$ a
+$24030$ (paso 1) subiendo y bajando $\Rightarrow$ lazo espín vs $\Dq$ en
+\texttt{table.dat}.
+
+\subsection{De dónde salen los números}
+
+\begin{itemize}
+\item Las rectas $-4\Dq$ y $-24\Dq+P$ son la \textbf{linealización de
+  Tanabe--Sugano} para $d^6$.
+\item El cruce real (de las fórmulas) es $20\Dq = 45224.16 \Rightarrow
+  \Dq = 2261.2$ cm$^{-1}$, es decir $\Delta_o = 22612$ cm$^{-1}$. El umbral
+  \texttt{22612} es por tanto $\Delta_o$ y \emph{no} $\Dq$: se mezclaron las dos
+  magnitudes (factor 10).
+\item $45224.16$ es la energía de apareamiento efectiva $P$.
+\item $B=23002$ no coincide con el $B$ de Racah real del Fe(II) ($\sim$900--1050
+  cm$^{-1}$); está declarado pero \textbf{no se usa}.
+\end{itemize}
+
+\subsection{Bugs y advertencias}
+
+\begin{enumerate}
+\item \textbf{$\kb$ al revés.} \texttt{exp(-dE/T * 0.695)} se evalúa como
+  $(-\Delta E/T)\cdot 0.695$ (el $0.695$ multiplica en vez de dividir). Debería
+  ser $-\Delta E/(T\cdot 0.695)$. Es el \emph{``error de probabilidades''} de la
+  nota \texttt{notas}.
+\item \textbf{\texttt{metropolis()} se llama dos veces} en \texttt{montecarlo()},
+  de modo que $\Delta E$ y la aceptación no son la misma propuesta.
+\item \textbf{$\Dq$ vs $\Delta_o$ (factor 10).} El umbral \texttt{22612}
+  corresponde a $\Delta_o$. Las pendientes $-4/-24$ están pensadas para $\Dq$.
+  El cruce queda bien localizado, pero las pendientes de energía quedan $10\times$
+  desviadas.
+\item \textbf{$B=23002$ muerto} (no usado).
+\item \textbf{Unidades.} $\Dq\sim 22000$ cm$^{-1}$ contra $\kb T \sim 0.7$
+  cm$^{-1}$ ($T=1$ K) $\Rightarrow$ el factor de Boltzmann es $0/1$ casi siempre
+  (función escalón), sin ensanchamiento térmico real.
+\end{enumerate}
+
+\section{\texttt{project\_sco}: red 3D elástica / Ising}
+
+Modelo \textbf{cooperativo} completo. Red cúbica de $N=n^3$ centros, cada uno con
+posición $(x,y,z)$, espín \texttt{tSpin} ($0/1$) y \textbf{radio} dependiente del
+espín: $R_{\HS}=0.418$, $R_{\LS}=0.38$, $R_{\HS}/R_{\LS}=1.1$.
+
+Hamiltoniano (caso 1 de \texttt{f\_totalEnergy\_totalMoment}):
+\begin{align}
+H &= H_o + H_{nn} + H_{\mathrm{mag}}\\
+H_o &= D \sum_i \sigma_i \qquad \text{(energía onsite de cambio de espín)}\\
+H_{nn} &= \frac{k_{nn}}{2}\sum_{(i,j)}\bigl(r_{ij}-(R_i+R_j)\bigr)^2 \quad \text{(resorte elástico)}\\
+H_{\mathrm{mag}} &= -j_{\mathrm{isin}}\sum_{(i,j)} \sigma_i\,\sigma_j \qquad \text{(acoplamiento Ising)}
+\end{align}
+
+La \textbf{cooperatividad} viene del resorte: si un centro pasa a $\HS$ crece su
+$R$ y estira a los vecinos, favoreciendo su transición. El algoritmo construye la
+red y los 6 vecinos, propone (voltear espín / desplazar $xyz$ / cambiar volumen
+NPT) y acepta con $e^{-\Delta E/T}$, y barre $T$ en ciclo $\Rightarrow$ histéresis.
+
+\emph{Bugs}: lector de \texttt{inputfile} vacío; $D$ sobreescrito en
+\texttt{f\_switchEnergy} caso 1 ($D = -T/5 + 1$); mezcla de $D$ y $j_{\mathrm{isin}}$
+en el caso 3; bug aritmético en el caso 5 (resta $H_{nnn,\mathrm{fin}}$ en vez de
+$H_{nnn,\mathrm{ini}}$); RNG re-siembra \texttt{std::random\_device} en cada
+llamada; unidades de $\kb$ inconsistentes; la clase \texttt{m\_lattice} es un stub.
+
+\section{\texttt{one\_D}: cadena 1D}
+
+Versión unidimensional del mismo modelo elástico/Ising: \texttt{Tatoms = 40},
+ciclo térmico $T_{\star}=1 \to T_{\mathrm{end}}=150$ (paso 2),
+$D_{\mathrm{parameter}} = -10$, promedios vivos y salida \texttt{E\_and\_M.dat} +
+gnuplot (genera los \texttt{test*.pdf}). Es el predecesor directo de
+\texttt{project\_sco} y sí llegó a generar resultados.
+
+\section{\texttt{DMF.beta.*}: procesado de magnetometría}
+
+No es simulación: procesa datos experimentales del magnetómetro (SQUID/PPMS).
+Lee \texttt{inputfile.dat} (masa, masa molar, constante diamagnética de Pascal,
+número de frecuencias) y calcula $M$ vs $H$ (\texttt{mvshFunction}), ZFCFC
+(\texttt{zfcfcfFunction}) y susceptibilidad AC (\texttt{acFunction}). Las
+versiones beta reflejan iteración sobre el mismo procesado.
+
+\section{\texttt{project\_one}: GUI Qt}
+
+Proyecto Qt (mainwindow + plots), probablemente una interfaz de
+visualización/análisis sobre los modelos o datos. Prototipo.
+
+\section{Errores comunes (checklist)}
+
+\begin{enumerate}
+\item \textbf{Unidades energía/temperatura.} Decidir una sola unidad (cm$^{-1}$ +
+  K con $\kb=0.695$ cm$^{-1}$/K, o eV con $\kb=8.617\times10^{-5}$ eV/K) y usarla
+  \emph{consistentemente} en $e^{-\Delta E/\kb T}$.
+\item \textbf{$\Dq$ vs $\Delta_o$ ($10\Dq$).} No mezclarlas en el mismo bucle.
+\item \textbf{Racah $A,B,C$.} $B(\mathrm{Fe}^{2+})\approx 917$--$1050$ cm$^{-1}$,
+  $C\approx 4B$.
+\item \textbf{RNG.} Sembrar \texttt{std::mt19937} \emph{una sola vez}.
+\item \textbf{Energía propuesta = energía aceptada.} Calcular $\Delta E$ una sola
+  vez por propuesta.
+\item \textbf{Lector de entrada.} No dejar los \texttt{case} vacíos.
+\end{enumerate}
+
+\section{Referencias}
+
+Material en \texttt{referencias/}. Lo esencial:
+Levchenko--Khristov--Varyukhin (2014, \emph{Low Temp.\ Phys.} \textbf{40}, 571);
+Lever, \emph{Inorganic Electronic Spectroscopy}; Kahn, \emph{Molecular Magnetism};
+Boča, \emph{Theoretical Foundations of Molecular Magnetism}; Paulsen--Trautwein
+(2004). Ver manifiesto en \texttt{referencias/README.md}.
+
+\end{document}
