@@ -1,46 +1,80 @@
-# SCO0: spin crossover electrónico-estructural a 0 K
+# SCO — transición de espín Fe(II) por campo de ligandos
 
-Prototipo **ilustrativo** de Fe(II) HS/LS con 1 o 2 centros. Usa Python 3.10+; no hace falta compilador C++. La geometría Fe–N cambia según la superficie electrónica y la distancia que intenta imponer la red. **No modela magnetismo, temperatura termodinámica, vibraciones ni cinética experimental.**
+Modelo mínimo de la transición de espín (spin crossover) de Fe(II). Captura el
+**mecanismo de raíz** del fenómeno: el **campo de ligandos `Dq(r)`**, que depende
+de la distancia Fe–N, es lo que provoca el cruce entre **alto espín (HS)** y
+**bajo espín (LS)**.
 
-**¿Cómo lo corro y cómo veo las gráficas?** Consulta la [guía de uso y visualización](docs/USO_Y_GRAFICAS.md). Cada ejecución crea automáticamente CSV y PNG en `results/`; abre primero `results/one_fe/trajectories.png` después de ejecutar el ejemplo. Los resultados son regenerables y no se suben al repositorio Git.
+> **Propósito de la modelación (el espíritu del código original `docs/prueba/main.cpp`):**
+> variar la distancia Fe–N → cambiar el campo de ligandos `Dq` → y ver cómo
+> **es el campo de ligandos el que provoca el cruce HS↔LS en su raíz**.
+> Sobre esta base se añadirán luego los factores que inciden sobre `Dq`
+> (temperatura, presión, cooperatividad de red, sustitución de ligandos).
 
-## Instalación y ejecución (desde esta carpeta)
+## El modelo
+
+Un solo centro Fe con distancia `r` (Å). El campo de ligandos decae con la
+distancia (modelo de cargas puntuales, `10·Dq ∝ r⁻⁵`):
+
+```
+Dq(r) = Dq0 · (r0/r)⁵          [cm⁻¹]
+```
+
+Energías electrónicas (linealización del diagrama de Tanabe–Sugano para d⁶):
+
+```
+E_HS(r) = −4·Dq(r)             (t₂g⁴ e_g²)
+E_LS(r) = −24·Dq(r) + P        (t₂g⁶, P = energía de apareamiento)
+```
+
+El cruce HS↔LS ocurre en `r_c = r0·(20·Dq0/P)^(1/5)`, donde `ΔE = E_HS − E_LS
+= 20·Dq − P = 0`. A distancia larga (campo débil) domina **HS**; a distancia
+corta (campo fuerte) domina **LS** (enlace Fe–N más corto, contracción de red).
+
+**Unidades:** energía en cm⁻¹, distancia en Å, temperatura en K, con
+`k_B = 0.695 cm⁻¹/K`. Valores de referencia (Fe²⁺): `Dq0 ≈ 1500 cm⁻¹`,
+`B(Racah) ≈ 917–1050 cm⁻¹`, `P ≈ 20000 cm⁻¹`.
+
+## Temperatura finita (Monte Carlo)
+
+El espín **se propone y se acepta** con Boltzmann `min(1, exp(−ΔE/k_B T))`
+(`sco0/metropolis.py`). A diferencia del prototipo anterior (que solo aceptaba
+movimientos cuesta abajo a 0 K), esto recupera el ensemble térmico real del
+código original. La fracción de HS tiene solución analítica exacta (sistema de
+dos niveles), que se usa como referencia:
+
+```
+n_HS(r, T) = 1 / (1 + exp(ΔE / k_B T))
+```
+
+## Instalación y ejecución
 
 ```bash
 python -m venv .venv
-source .venv/Scripts/activate   # Git Bash en Windows
+source .venv/bin/activate            # Linux/macOS
 python -m pip install -r requirements.txt
+
+# pruebas
 python -m unittest discover -s tests -v
+
+# barrido de distancia (campo de ligandos → cruce)
 python -m sco0 --config examples/one_fe.json --out results/one_fe
-python -m sco0 --config examples/six_ligands.json --out results/six_ligands
-python -m sco0 --config examples/two_fe.json --out results/two_fe
+
+# barrido de temperatura a distancia fija (cruce suave, no cooperativo)
+python -m sco0 --config examples/one_fe_temperature.json --out results/one_fe_temperature
 ```
 
-Si Python ya tiene las dependencias, basta ejecutar los tres últimos comandos. Para ayuda: `python -m sco0 --help`. En PowerShell la activación del entorno virtual es distinta; también se puede llamar directamente a `.venv/Scripts/python.exe`.
+## Salidas (`results/<out>/`)
 
-## Modelo
+- `surfaces.png` — `E_HS(r)`, `E_LS(r)`, `Dq(r)` y `Δo(r)` con el cruce `r_c`.
+- `crossover.png` — fracción HS vs `r` (o vs `T`): analítico frente a Monte Carlo.
+- `equilibrium.csv` — referencia analítica por paso (con `Dq`, `Δo`, `gap`, `n_HS`).
+- `monte_carlo.csv` — fracción HS muestreada por Metropolis.
+- `config_used.json` — configuración efectiva.
 
-Para cada centro, `x=r/r_ref` y `E_s(r)=E_scale*(1/(9*x**9) - 0.02*ligand_strength*rho_s/x**5 - 1/x)+P_s`. Para HS: `rho=2, P_s=0`; para LS: `rho=12, P_s=P_LS`. El potencial de Jørgensen es **ilustrativo** y originalmente no constituye una parametrización de Fe(py)₂[Ni(CN)₄]. Las energías están en eV, las distancias en Å y las rigideces en eV/Å².
+## Qué NO modela (todavía)
 
-En `geometry="radial"` hay una sola coordenada efectiva `r` por Fe. En `geometry="six_radial"` hay un Fe **fijo** en el origen y seis N sobre los semiejes `+x, -x, +y, -y, +z, -z`; cada posición tiene **su propio radio independiente**. N1–N4 son ecuatoriales y N5–N6 axiales. Solo **un** nitrógeno se mueve por intento, a lo largo de su eje; no hay movimiento angular ni simulación de orbitales o interacciones N–N. La energía electrónica es la **media de los seis términos** de Jørgensen más `P_LS` una sola vez. Así recupera exactamente el modelo radial cuando las seis distancias son iguales. `Δ_o = 0.1*E_scale*ligand_strength*mean((r_ref/r_j)**5)`; la distancia media *no* se inserta en la potencia quinta. La definición de Δ_o para geometrías distorsionadas es una aproximación isotrópica ilustrativa, **no un cálculo de campo tetragonal ni un Hamiltoniano atomístico validado**.
-
-La restricción de red es `K_red*mean((r_j-R_red)**2)/2` por centro, y opcionalmente se penaliza deformar la esfera mediante `K_shape*sum((r_j-mean(r_j))**2)/2`. Ambas se reducen a la expresión radial original para seis radios iguales. Solo para dos Fe puede activarse `K_bridge*(mean(r_1j)+mean(r_2j)+L_bridge-R_bridge)**2/2`: es una **restricción de longitud de un fragmento idealizado**, no una descripción atomística de la red de Hofmann. Con `K_bridge=0` los centros son independientes. No hay intercambio magnético.
-
-`protocol="nominal"` emplea `R_red(T)=R_0K+(R_300K-R_0K)*T/300` y barridos desde `nominal_start` hasta `nominal_end` en pasos `delta_T`. Aquí **T es únicamente una etiqueta geométrica**, nunca se usa `kBT`. `protocol="distance"` barre directamente desde `R_start` hasta `R_end` en pasos `delta_R`; la columna `nominal_T_K` será vacía. La secuencia de calentamiento recorre el camino inverso conservando el estado final del enfriamiento.
-
-En **cada geometría fija** se evalúan las dos ramas electrónicas y se asigna `HS` si `E_HS <= E_LS`, o `LS` en caso contrario; `E_ground=min(E_HS,E_LS)` por centro. **El espín nunca se propone aleatoriamente.** En cada intento MC se copia la geometría, se desplaza temporalmente un único radio elegido al azar, se recalcula el estado fundamental y se acepta solo si la **energía total** propuesta es menor o igual; si se rechaza no cambian coordenadas ni espín. Al cambiar la red, se recalcula el estado de la misma geometría antes del primer intento. **Un barrido MC = `N_Fe` intentos (radial) o `6*N_Fe` intentos (seis radios)**; esto no equivale a segundos. La referencia cuasiestática minimiza por separado cada configuración HS/LS y compara las energías optimizadas; en el modo de seis ligandos se usan varios puntos de partida numéricos, sin garantía matemática de mínimo global. `sweeps_fast`, `sweeps_slow`, `replicas` y `seed` son configurables; para ensayar condiciones geométricas iniciales diferentes se puede ejecutar otra vez con `initial_branch="LS"` en vez de `"HS"` (solo cambia el **radio inicial**, no fuerza el espín). Los tres ejemplos utilizan `P_LS=3.9 eV` como valor **ilustrativo** que permite alcanzar el cruce: no es un dato experimental. Para investigar el atrapamiento, probar `P_LS=4.7 eV` en otro barrido y comparar contra el equilibrio; no cambiar el algoritmo para forzar la transición.
-
-## Archivos generados
-
-- `config_used.json`: configuración efectiva completa.
-- `equilibrium.csv`: estado fundamental cuasiestático por distancia externa.
-- `spin_surfaces.csv`: mínimos de HS/LS (o las cuatro combinaciones para dos Fe) por distancia.
-- `trajectories.csv`: cada réplica y paso con distancias medias `r1_A`, `r2_A`, `delta1_eV`, `delta2_eV` y estados `spin1_HS`, `spin2_HS` (HS=1, LS=0); en modo de seis radios también `fe1_n1_A` … `fe1_n6_A` y sus coordenadas relativas `fe1_n1_x_A`, `fe1_n1_y_A`, `fe1_n1_z_A`, etc. (también en `equilibrium.csv` y `spin_surfaces.csv`).
-- `attempts.csv`: **cada intento** con centro y ligando elegido, distancia antes/propuesta/después, energías antes/propuesta/después, estado electrónico antes/propuesto/después y decisión de aceptación. Puede ocupar decenas de MB en barridos largos; no contiene un tiempo físico.
-- `averages.csv`: promedios entre réplicas; un espín medio fraccionario no significa un estado electrónico intermedio.
-- `convergence.csv`: energía durante los barridos MC en cada paso.
-- `surfaces.png` (incluye `Δ_o(r)`), `trajectories.png`, `convergence.png`, en modo nominal `nominal_distance.png` y en modo de seis radios `ligand_distances.png`.
-
-**Interpretación:** el cruce a geometría fija, el cruce entre energías *ya minimizadas* y el cambio observado durante MC pueden ocurrir en diferentes puntos. Los pequeños movimientos de descenso pueden quedar bloqueados ante una barrera: **que la referencia cambie a LS no garantiza que el MC geométrico alcance LS**. Un salto de geometría en el equilibrio no requiere ruido térmico; un bucle producido por Monte Carlo a 0 K puede ser atrapamiento algorítmico, **no una predicción de histéresis experimental en K/min**. La persistencia o desaparición del bucle con más barridos debe comprobarse. La aproximación de estado electrónico instantáneo tampoco calcula barreras o tasas físicas de interconversión entre multiplicidades. No se simulan vibraciones térmicas, susceptibilidad ni momento magnético.
-
-El cruce `r_c` de `surfaces.png` se calcula **solo para seis radios iguales**: con radios distintos, la condición de cruce depende de los seis valores y no hay una única distancia crítica escalar. Las gráficas no representan niveles multiplete completos de Tanabe–Sugano.
+Un centro aislado da un **cruce suave**, no una transición de primer orden con
+histéresis. La histéresis exige **cooperatividad** (red elástica acoplada),
+que es la siguiente fase (ver `docs/GUIA_PARA_CONTINUAR.pdf`). Ver también la
+memoria del proyecto en `docs/MEMORIA_DEL_PROYECTO_ORIGINAL.pdf`.

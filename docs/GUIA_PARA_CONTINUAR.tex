@@ -145,14 +145,19 @@ en dos direcciones $\Rightarrow$ fracción $\HS$ vs $T$ con lazo.
 
 \section{Hoja de ruta en fases}
 
+\noindent\textbf{Estado actual:} las Fases 0 y 1 ya están implementadas en el
+paquete \texttt{sco0/} (campo de ligandos $\Dq(r)$, constantes físicas,
+\texttt{metropolis.py} a temperatura finita, protocolos de distancia y de
+temperatura, pruebas y figuras). Las Fases 2--4 son el trabajo por delante.
+
 \begin{description}
-\item[Fase 0 -- Unidades y constantes.] Crear \texttt{sco0/constants.py} con
-  $\kb$, $B$, $C$, $Dq_0$, etc.; fijar una sola unidad (cm$^{-1}$ + K).
-\item[Fase 1 -- Un centro, $T$ finita.] Reescribir
-  \texttt{model.py::electronic\_energy} con la energía de campo de ligandos;
-  añadir \texttt{sco0/metropolis.py} con propuesta de espín + Boltzmann.
-  Objetivo: cruce térmico \emph{suave} (sin escalón), validar contra
-  \texttt{prueba/main.cpp} (pero con $\kb$ y $\Dq$ correctos).
+\item[Fase 0 -- Unidades y constantes.] \textbf{[hecho]} \texttt{sco0/constants.py}
+  con $\kb$, $B$, $C$, $Dq_0$; unidad única cm$^{-1}$ + K.
+\item[Fase 1 -- Un centro, $T$ finita.] \textbf{[hecho]}
+  \texttt{model.py} con la energía de campo de ligandos, \texttt{metropolis.py}
+  con propuesta de espín + Boltzmann, y los protocolos \texttt{distance} y
+  \texttt{temperature}. Objetivo logrado: cruce suave validado contra la solución
+  analítica (dos niveles).
 \item[Fase 2 -- Cooperatividad.] $N$ centros (1D $\to$ 2D/3D), resorte entre
   vecinos, Metropolis conjunto (espín + posición + volumen). Objetivo: transición
   de primer orden y lazo de histéresis.
@@ -165,20 +170,25 @@ en dos direcciones $\Rightarrow$ fracción $\HS$ vs $T$ con lazo.
 
 \section{Qué tocar en el código (mapa concreto)}
 
+La columna ``Acción'' de las Fases 0--1 ya está aplicada. El paquete actual
+quedó así (todo lo marcado como \textbf{hecho} está implementado):
+
 \begin{center}
 \begin{tabular}{ll}
 \toprule
-Archivo & Acción \\
+Archivo & Estado \\
 \midrule
-\texttt{sco0/config.py} & Conservar; añadir $N$, $\Dq_0$, $r_0$, $P$, $B$, $J$, $K$, $T$ (rango/paso), $\kb$ \\
-\texttt{sco0/model.py} & Reescribir \texttt{electronic\_energy} / \texttt{ground\_state} \\
-\texttt{sco0/metropolis.py} & \textbf{Nuevo}: espín + posición, $e^{-\Delta E/\kb T}$ \\
-\texttt{sco0/monte\_carlo.py} & Reemplazar el descenso 0 K por Metropolis térmico \\
-\texttt{sco0/equilibrium.py} & Conservar (adaptada a la nueva energía) \\
-\texttt{sco0/protocol.py} & Reescribir como ciclo de $T$ real \\
-\texttt{sco0/output.py} & Conservar; añadir curva $\HS$ vs $T$ (ambos sentidos) \\
-\texttt{sco0/constants.py} & \textbf{Nuevo}: constantes físicas y de Racah \\
-\texttt{tests/} & Ampliar: Boltzmann, cruce, histéresis \\
+\texttt{sco0/constants.py} & \textbf{hecho}: $\kb$, Racah $B$, $C$ \\
+\texttt{sco0/config.py} & \textbf{hecho}: $\Dq_0$, $r_0$, $P$, protocolos, MC, semilla \\
+\texttt{sco0/model.py} & \textbf{hecho}: $\Dq(r)$, $E_{\HS}$, $E_{\LS}$, cruce, fracción analítica \\
+\texttt{sco0/metropolis.py} & \textbf{hecho}: espín propuesto, $e^{-\Delta E/\kb T}$ \\
+\texttt{sco0/monte\_carlo.py} & \textbf{hecho}: Metropolis térmico con réplicas \\
+\texttt{sco0/equilibrium.py} & \textbf{hecho}: referencia analítica de dos niveles \\
+\texttt{sco0/protocol.py} & \textbf{hecho}: \texttt{distance} y \texttt{temperature} \\
+\texttt{sco0/output.py} & \textbf{hecho}: \texttt{surfaces.png} y \texttt{crossover.png} \\
+\texttt{tests/} & \textbf{hecho}: 14 pruebas (cruce, Boltzmann, reproducción) \\
+\midrule
+\textbf{Pendiente (Fase 2)} & $N$ centros, resorte entre vecinos, acoplamiento $J$ \\
 \bottomrule
 \end{tabular}
 \end{center}

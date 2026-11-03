@@ -1,92 +1,81 @@
-"""Illustrative electronic energy surfaces (eV) and radial forces (eV/Å)."""
+"""Modelo de campo de ligandos: Dq(r) provoca el cruce HS↔LS.
+
+El espíritu del modelo (heredado de `docs/prueba/main.cpp`):
+
+    variar la distancia Fe–N (r)  ⟶  cambia el campo de ligandos Dq(r)  ⟶  cruza HS/LS.
+
+La temperatura NO entra en estas energías; solo modifica la población térmica
+a través del muestreo de Metropolis (ver `metropolis.py`).
+
+Energías (linealización del diagrama de Tanabe–Sugano para d⁶):
+
+    E_HS(r) = -4·Dq(r)          (t₂g⁴ e_g²)
+    E_LS(r) = -24·Dq(r) + P     (t₂g⁶, con energía de apareamiento P)
+
+El campo de ligandos decae con la distancia (modelo de cargas puntuales,
+10·Dq ∝ r⁻⁵): Dq(r) = Dq0·(r0/r)⁵.
+
+Unidades: energía en cm⁻¹, distancia en Å.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 
 from .config import Config
+from .constants import KB_CM1
 
 
-def electronic_energy(r: float | np.ndarray, hs: bool, cfg: Config):
-    x = np.asarray(r) / cfg.r_ref
-    rho = 2 if hs else 12
-    energy = cfg.E_scale * (1 / (9 * x**9) - 0.02 * cfg.ligand_strength * rho / x**5 - 1 / x)
-    return energy if hs else energy + cfg.P_LS
+def ligand_field(r: float | np.ndarray, cfg: Config) -> float | np.ndarray:
+    """Campo de ligandos Dq(r) = Dq0·(r0/r)⁵ (cm⁻¹)."""
+    r = np.asarray(r, dtype=float)
+    return cfg.Dq0 * (cfg.r0 / r) ** 5
 
 
-def electronic_derivative(r: float | np.ndarray, hs: bool, cfg: Config):
-    x = np.asarray(r) / cfg.r_ref
-    rho = 2 if hs else 12
-    return cfg.E_scale / cfg.r_ref * (-1 / x**10 + 0.1 * cfg.ligand_strength * rho / x**6 + 1 / x**2)
+def delta_o(r: float | np.ndarray, cfg: Config) -> float | np.ndarray:
+    """Desdoblamiento octaédrico Δo(r) = 10·Dq(r) (cm⁻¹)."""
+    return 10.0 * ligand_field(r, cfg)
+
+
+def electronic_energy(
+    r: float | np.ndarray, hs: bool, cfg: Config
+) -> float | np.ndarray:
+    """Energía electrónica de un centro: -4·Dq (HS) o -24·Dq + P (LS)."""
+    dq = ligand_field(r, cfg)
+    return -4.0 * dq if hs else -24.0 * dq + cfg.P
+
+
+def energy_gap(r: float | np.ndarray, cfg: Config) -> float | np.ndarray:
+    """ΔE = E_HS - E_LS = 20·Dq(r) - P. Positivo ⇒ LS es más estable."""
+    return 20.0 * ligand_field(r, cfg) - cfg.P
+
+
+def electronic_derivative(
+    r: float | np.ndarray, hs: bool, cfg: Config
+) -> float | np.ndarray:
+    """dE/dr. Como d(Dq)/dr = -5·Dq/r ⇒ dE_HS/dr = 20·Dq/r y dE_LS/dr = 120·Dq/r."""
+    r = np.asarray(r, dtype=float)
+    dq = ligand_field(r, cfg)
+    return (20.0 * dq / r) if hs else (120.0 * dq / r)
 
 
 def crossing_distance(cfg: Config) -> float | None:
-    """Analytic intersection of the unrestrained surfaces, if within bounds."""
-    if cfg.P_LS <= 0:
+    """Distancia de cruce r_c donde E_HS = E_LS ⇒ Dq = P/20.
+
+    r_c = r0·(20·Dq0/P)^(1/5). Devuelve None si cae fuera de [r_min, r_max].
+    """
+    if cfg.P <= 0:
         return None
-    r = cfg.r_ref * (0.2 * cfg.E_scale * cfg.ligand_strength / cfg.P_LS) ** 0.2
-    return r if cfg.r_min <= r <= cfg.r_max else None
+    r_c = cfg.r0 * (20.0 * cfg.Dq0 / cfg.P) ** 0.2
+    return float(r_c) if cfg.r_min <= r_c <= cfg.r_max else None
 
 
-def ligand_delta(r: float | np.ndarray, cfg: Config) -> float:
-    """Effective octahedral Δ_o (eV); mean r^-5, NOT (mean r)^-5."""
-    x = np.asarray(r, dtype=float) / cfg.r_ref
-    return 0.1 * cfg.E_scale * cfg.ligand_strength * float(np.mean(x ** -5))
+def hs_fraction(r: float | np.ndarray, T: float, cfg: Config) -> float | np.ndarray:
+    """Fracción térmica de HS (solución analítica del sistema de dos niveles).
 
-
-def ligand_positions(distances: np.ndarray, cfg: Config) -> np.ndarray:
-    """Cartesian N coordinates (N_Fe, 6, 3) relative to Fe at the origin."""
-    if cfg.geometry != "six_radial":
-        raise ValueError("Explicit ligand positions require six_radial geometry")
-    radii = _radii(distances, cfg)
-    axes = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0],
-                     [0, 0, 1], [0, 0, -1]], dtype=float)
-    return radii[:, :, None] * axes[None, :, :]
-
-
-def _radii(distances: np.ndarray, cfg: Config) -> np.ndarray:
-    r = np.asarray(distances, dtype=float)
-    expected = (cfg.N_Fe,) if cfg.geometry == "radial" else (cfg.N_Fe, 6)
-    if r.shape != expected:
-        raise ValueError(f"Expected distances with shape {expected}")
-    if not np.all(np.isfinite(r)) or np.any(r < cfg.r_min) or np.any(r > cfg.r_max):
-        raise ValueError("Fe–N distance outside configured bounds or not finite")
-    return r if cfg.geometry == "six_radial" else r[:, None]
-
-
-def ground_state(distances: np.ndarray, R_red: float, cfg: Config) -> tuple[float, np.ndarray]:
-    """Electrons instantly occupy the lower fixed-geometry surface; spin is not sampled."""
-    r = _radii(distances, cfg)
-    hs = np.array([np.mean(electronic_energy(site, True, cfg)) <=
-                   np.mean(electronic_energy(site, False, cfg)) for site in r], dtype=bool)
-    return total_energy(distances, hs, R_red, cfg), hs
-
-
-def total_energy(distances: np.ndarray, spins_hs: np.ndarray, R_red: float, cfg: Config) -> float:
-    r = _radii(distances, cfg)
-    spins = np.asarray(spins_hs, dtype=bool)
-    if spins.shape != (cfg.N_Fe,):
-        raise ValueError("Expected one spin for each Fe")
-    energy = sum(float(np.mean(electronic_energy(ri, bool(si), cfg))) for ri, si in zip(r, spins))
-    energy += 0.5 * cfg.K_red * float(np.sum(np.mean((r - R_red) ** 2, axis=1)))
-    if cfg.geometry == "six_radial":
-        energy += 0.5 * cfg.K_shape * float(np.sum((r - r.mean(axis=1, keepdims=True)) ** 2))
-    if cfg.N_Fe == 2:
-        energy += 0.5 * cfg.K_bridge * float((r.mean(axis=1).sum() + cfg.L_bridge - cfg.R_bridge) ** 2)
-    return energy
-
-
-def gradient(distances: np.ndarray, spins_hs: np.ndarray, R_red: float, cfg: Config) -> np.ndarray:
-    """Derivative of total energy with respect to the Fe–N distances; force = -gradient."""
-    r = _radii(distances, cfg)
-    spins = np.asarray(spins_hs, dtype=bool)
-    if spins.shape != (cfg.N_Fe,):
-        raise ValueError("Expected one spin for each Fe")
-    count = r.shape[1]
-    grad = np.stack([electronic_derivative(ri, bool(si), cfg) for ri, si in zip(r, spins)]) / count
-    grad += cfg.K_red * (r - R_red) / count
-    if cfg.geometry == "six_radial":
-        grad += cfg.K_shape * (r - r.mean(axis=1, keepdims=True))
-    if cfg.N_Fe == 2:
-        grad += cfg.K_bridge * (r.mean(axis=1).sum() + cfg.L_bridge - cfg.R_bridge) / count
-    return grad if cfg.geometry == "six_radial" else grad[:, 0]
+    n_HS = 1 / (1 + exp(ΔE/(k_B T))). En T = 0 es la función escalón
+    (HS si ΔE ≤ 0, LS si ΔE > 0).
+    """
+    if T <= 0:
+        return np.where(energy_gap(r, cfg) <= 0, 1.0, 0.0)
+    return 1.0 / (1.0 + np.exp(energy_gap(r, cfg) / (KB_CM1 * T)))

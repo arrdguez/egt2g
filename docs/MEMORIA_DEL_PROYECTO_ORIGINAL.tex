@@ -53,6 +53,26 @@ afirma de cada código está verificado contra el fuente en \texttt{~/Dropbox/sr
   en cm$^{-1}$) y varios bugs menores.
 \end{itemize}
 
+\section{Propósito de la modelación}
+
+\begin{center}
+\fbox{\parbox{0.95\linewidth}{\small
+\textbf{El espíritu del proyecto (recogido en \texttt{prueba/main.cpp}):}\\[1mm]
+\textit{variar la distancia Fe--N y ver cómo es el \textbf{campo de ligandos}
+$\Dq(r)$ el que provoca, en su raíz, la transición de espín
+$\HS\leftrightarrow\LS$. Sobre esta base se añadirán luego los factores que
+inciden sobre el campo de ligandos (temperatura, presión, cooperatividad de
+red, sustitución de ligandos).}
+}}
+\end{center}
+
+Es decir: el modelo parte de \emph{un solo centro} y de la relación más
+fundamental del problema --- la dependencia del campo de ligandos con la
+geometría, $\Dq(r)$ --- y de ahí construye todo lo demás. Esta es la misma idea
+que implementaba \texttt{prueba/main.cpp} (energías $\HS$/$\LS$ lineales en
+$\Dq$, con el cruce de Tanabe--Sugano) y que ahora recupera el paquete
+\texttt{sco0} de forma corregida (ver \texttt{GUIA\_PARA\_CONTINUAR.pdf}).
+
 \section{Contexto y objetivo original}
 
 \textbf{Doctorado (2016--2019).} La parte experimental consistió en sintetizar y

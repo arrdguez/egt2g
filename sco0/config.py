@@ -1,4 +1,10 @@
-"""Configuration of the illustrative, zero-temperature model."""
+"""Configuración del modelo de campo de ligandos (energías en cm⁻¹, distancias en Å).
+
+El único grado de libertad microscópico es la distancia Fe–N `r`. El campo de
+ligandos Dq(r) es lo que provoca, en su raíz, la transición HS↔LS. La
+temperatura actúa como control externo de los barridos (no entra en el
+Hamiltoniano: solo modifica la población térmica vía Metropolis).
+"""
 
 from __future__ import annotations
 
@@ -10,73 +16,63 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Config:
-    N_Fe: int = 1
-    E_scale: float = 15.0  # eV
-    P_LS: float = 4.7  # eV; illustrative, not an experimental Racah parameter
-    r_ref: float = 2.2  # Å
-    ligand_strength: float = 1.0
-    geometry: str = "radial"  # radial | six_radial
-    initial_branch: str = "HS"  # starting GEOMETRY near HS/LS minimum, not a spin constraint
-    K_red: float = 20.0  # eV/Å²
-    K_shape: float = 10.0  # eV/Å²; radial shape penalty in six_radial mode
-    K_bridge: float = 0.0  # eV/Å²
-    L_bridge: float = 5.0  # Å; effective length, not an atomistic geometry
-    R_bridge: float = 9.2  # Å
-    R_300K: float = 2.30  # Å; independent from HS equilibrium distance
-    R_0K: float = 1.96  # Å; independent from LS equilibrium distance
-    nominal_start: float = 300.0
-    nominal_end: float = 0.0
-    delta_T: float = 5.0
-    protocol: str = "nominal"  # nominal | distance
-    R_start: float = 2.30
-    R_end: float = 1.96
-    delta_R: float = 0.005  # Å
-    delta_r: float = 0.025  # Å, local proposals
-    sweeps_fast: int = 20
-    sweeps_slow: int = 400
-    replicas: int = 4
-    seed: int = 2026
-    r_min: float = 1.65  # Å
-    r_max: float = 2.55  # Å
+    # --- Modelo de campo de ligandos (un solo centro Fe) ---
+    Dq0: float = 1500.0  # campo de ligandos en r0 (cm⁻¹); Δo = 10·Dq0
+    r0: float = 2.0  # distancia Fe–N de referencia (Å)
+    P: float = 20000.0  # energía de apareamiento (cm⁻¹)
+
+    # --- Cota de la distancia Fe–N ---
+    r_min: float = 1.80  # Å
+    r_max: float = 2.40  # Å
+
+    # --- Protocolo de barrido ---
+    protocol: str = "distance"  # "distance" | "temperature"
+
+    # Barrido de distancia (a T_fixed constante)
+    R_start: float = 2.40  # Å (campo débil → HS)
+    R_end: float = 1.80  # Å (campo fuerte → LS)
+    delta_R: float = 0.005  # Å (paso)
+    T_fixed: float = 300.0  # K, temperatura del barrido de distancia
+
+    # Barrido de temperatura (a r_fixed constante)
+    r_fixed: float = 2.17  # Å, distancia fijada para el barrido térmico
+    T_start: float = 400.0  # K
+    T_end: float = 0.0  # K
+    delta_T: float = 4.0  # K (paso)
+
+    # --- Monte Carlo ---
+    equilibration: int = 2000  # pasos de termalización (descartados)
+    mc_steps: int = 20000  # pasos de medición por réplica
+    replicas: int = 4  # réplicas independientes (promediadas)
+    seed: int = 2026  # semilla reproducible
 
     def __post_init__(self) -> None:
-        if self.N_Fe not in (1, 2):
-            raise ValueError("N_Fe must be 1 or 2")
-        if self.geometry not in ("radial", "six_radial"):
-            raise ValueError("geometry must be 'radial' or 'six_radial'")
-        if self.initial_branch not in ("HS", "LS"):
-            raise ValueError("initial_branch must be 'HS' or 'LS'")
-        for key in ("E_scale", "r_ref", "ligand_strength", "delta_T", "delta_R", "delta_r"):
+        if self.protocol not in ("distance", "temperature"):
+            raise ValueError("protocol debe ser 'distance' o 'temperature'")
+        for key in ("Dq0", "r0", "P", "delta_R", "delta_T"):
             if not math.isfinite(getattr(self, key)) or getattr(self, key) <= 0:
-                raise ValueError(f"{key} must be finite and positive")
-        for key in ("K_red", "K_bridge", "K_shape"):
+                raise ValueError(f"{key} debe ser finito y positivo")
+        for key in ("T_fixed", "T_start", "T_end", "R_start", "R_end"):
             if not math.isfinite(getattr(self, key)) or getattr(self, key) < 0:
-                raise ValueError(f"{key} must be finite and nonnegative")
-        for key in ("P_LS", "L_bridge", "R_bridge", "R_300K", "R_0K", "nominal_start", "nominal_end", "R_start", "R_end", "r_min", "r_max"):
-            if not math.isfinite(getattr(self, key)):
-                raise ValueError(f"{key} must be finite")
+                raise ValueError(f"{key} debe ser finito y no negativo")
         if not 0 < self.r_min < self.r_max:
-            raise ValueError("Require 0 < r_min < r_max")
-        if not self.r_min <= self.R_0K <= self.r_max or not self.r_min <= self.R_300K <= self.r_max:
-            raise ValueError("R_0K and R_300K must lie within the distance bounds")
-        if self.protocol not in ("nominal", "distance"):
-            raise ValueError("protocol must be 'nominal' or 'distance'")
-        if self.protocol == "nominal" and self.nominal_start <= self.nominal_end:
-            raise ValueError("nominal_start must exceed nominal_end")
-        if self.protocol == "distance" and not (self.r_min <= self.R_end < self.R_start <= self.r_max):
-            raise ValueError("Require r_min <= R_end < R_start <= r_max")
-        if self.replicas < 1 or self.sweeps_fast < 1 or self.sweeps_slow < 1:
-            raise ValueError("replicas and sweeps must be positive integers")
+            raise ValueError("Se requiere 0 < r_min < r_max")
+        for key in ("r_fixed", "R_start", "R_end"):
+            if not self.r_min <= getattr(self, key) <= self.r_max:
+                raise ValueError(f"{key} debe estar dentro de [r_min, r_max]")
+        if self.equilibration < 1 or self.mc_steps < 1 or self.replicas < 1:
+            raise ValueError("equilibration, mc_steps y replicas deben ser >= 1")
         if self.seed < 0:
-            raise ValueError("seed must be nonnegative")
+            raise ValueError("seed debe ser no negativo")
 
 
 def load_config(path: str | Path) -> Config:
+    """Carga la configuración desde un JSON y rechaza claves desconocidas."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError("JSON configuration must be an object")
+        raise ValueError("La configuración JSON debe ser un objeto")
     allowed = {field.name for field in fields(Config)}
     unknown = set(data) - allowed
     if unknown:
-        raise ValueError(f"Unknown configuration keys: {', '.join(sorted(unknown))}")
+        raise ValueError(f"Claves desconocidas: {', '.join(sorted(unknown))}")
     return Config(**data)

@@ -1,124 +1,129 @@
-"""CSV and PNG reports of zero-temperature model calculations."""
+"""CSV y PNG del modelo de campo de ligandos (numpy + matplotlib).
+
+Genera:
+  - config_used.json   configuración efectiva
+  - equilibrium.csv    referencia analítica (fracción HS exacta)
+  - monte_carlo.csv    fracción HS muestreada por Metropolis
+  - surfaces.png       E_HS(r), E_LS(r), Dq(r) y Δo(r) con el cruce
+  - crossover.png      fracción HS vs r (o vs T): analítico frente a Monte Carlo
+"""
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import asdict
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-from scipy.optimize import minimize_scalar
 
 from .config import Config
-from .model import crossing_distance, electronic_energy, ligand_delta
+from .model import crossing_distance, delta_o, electronic_energy, ligand_field
 
 
-def export(out: Path, cfg: Config, equilibrium: list[dict], surfaces: list[dict],
-           samples: list[dict], convergence: list[dict]) -> None:
+def export(
+    out: Path, cfg: Config, equilibrium: list[dict], samples: list[dict]
+) -> None:
+    """Escribe la configuración, los CSV y las figuras PNG."""
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config_used.json").write_text(json.dumps(asdict(cfg), indent=2), encoding="utf-8")
-    eq = pd.DataFrame(equilibrium)
-    eq.to_csv(out / "equilibrium.csv", index=False)
-    pd.DataFrame(surfaces).to_csv(out / "spin_surfaces.csv", index=False)
-    df = pd.DataFrame(samples)
-    df.to_csv(out / "trajectories.csv", index=False)
-    pd.DataFrame(convergence).to_csv(out / "convergence.csv", index=False)
-    numeric = ["energy_eV", "hs_fraction", "accepted", "attempts"] + [
-        value for i in range(1, cfg.N_Fe + 1)
-        for value in (f"r{i}_A", f"spin{i}_HS", f"delta{i}_eV")]
-    if cfg.geometry == "six_radial":
-        numeric.extend(f"fe{i}_n{j}_A" for i in range(1, cfg.N_Fe + 1) for j in range(1, 7))
-    averaged = df.groupby(["speed", "direction", "step", "R_red_A", "nominal_T_K"],
-                          dropna=False, as_index=False)[numeric].mean()
-    averaged.to_csv(out / "averages.csv", index=False)
+    (out / "config_used.json").write_text(
+        json.dumps(asdict(cfg), indent=2), encoding="utf-8"
+    )
 
+    _write_csv(out / "equilibrium.csv", equilibrium)
+    _write_csv(out / "monte_carlo.csv", samples)
+
+    _plot_surfaces(out, cfg)
+    _plot_scan(out, cfg, equilibrium, samples)
+
+
+def _write_csv(path: Path, rows: list[dict]) -> None:
+    """Escribe una lista de diccionarios como CSV (sin pandas)."""
+    if not rows:
+        path.write_text("", encoding="utf-8")
+        return
+    fields = list(rows[0].keys())
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _plot_surfaces(out: Path, cfg: Config) -> None:
+    """Figura 1: superficies electrónicas y campo de ligandos en función de r."""
     radii = np.linspace(cfg.r_min, cfg.r_max, 600)
+    r_c = crossing_distance(cfg)
+
     fig, axes = plt.subplots(1, 3, figsize=(16, 4))
-    for hs, name in ((True, "HS"), (False, "LS")):
-        energy = electronic_energy(radii, hs, cfg)
-        axes[0].plot(radii, energy, label=name)
-        minimum = minimize_scalar(lambda r: electronic_energy(r, hs, cfg),
-                                  bounds=(cfg.r_min, cfg.r_max), method="bounded")
-        axes[0].scatter([minimum.x], [minimum.fun], s=28)
-    axes[0].set(xlabel="Fe–N (Å)", ylabel="E electrónica (eV)", title="Superficies sin red")
+
+    axes[0].plot(radii, electronic_energy(radii, True, cfg), label="HS (t₂g⁴e_g²)")
+    axes[0].plot(radii, electronic_energy(radii, False, cfg), label="LS (t₂g⁶)")
+    if r_c is not None:
+        axes[0].axvline(r_c, color="gray", linestyle=":", label=f"r_c = {r_c:.3f} Å")
+    axes[0].set(xlabel="Fe–N (Å)", ylabel="E (cm⁻¹)", title="Superficies electrónicas")
     axes[0].legend()
-    axes[1].plot(radii, electronic_energy(radii, False, cfg) - electronic_energy(radii, True, cfg))
-    axes[1].axhline(0, color="black", linewidth=0.8)
-    crossing = crossing_distance(cfg)
-    if crossing is not None:
-        axes[0].axvline(crossing, linestyle=":", color="gray")
-        axes[1].axvline(crossing, linestyle=":", color="gray", label=f"Cruce {crossing:.3f} Å")
-        axes[1].legend()
-    axes[1].set(xlabel="Fe–N (Å)", ylabel="E LS − E HS (eV)", title="Competencia electrónica")
-    axes[2].plot(radii, [ligand_delta(r, cfg) for r in radii])
-    axes[2].set(xlabel="Fe–N (Å)", ylabel="Δ_o efectivo (eV)", title="Campo ligando ∝ r⁻⁵")
-    _save(fig, out / "surfaces.png")
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
-    for i in range(1, cfg.N_Fe + 1):
-        axes[0, 0].plot(eq["R_red_A"], eq[f"r{i}_A"], color="black", linewidth=2,
-                        label=f"equilibrio Fe{i}" if cfg.N_Fe == 2 else "equilibrio")
-        axes[0, 1].plot(eq["R_red_A"], eq[f"spin{i}_HS"], color="black", linewidth=1)
-    for (speed, direction), group in averaged.groupby(["speed", "direction"]):
-        group = group.sort_values("step")
-        label = f"{speed} {direction}"
-        style = "-" if direction == "cooling" else "--"
-        for i in range(1, cfg.N_Fe + 1):
-            suffix = f" Fe{i}" if cfg.N_Fe == 2 else ""
-            axes[0, 0].plot(group["R_red_A"], group[f"r{i}_A"], style, label=label + suffix)
-            axes[0, 1].plot(group["R_red_A"], group[f"spin{i}_HS"], style, label=label + suffix)
-        axes[1, 0].plot(group["R_red_A"], group["energy_eV"], style, label=label)
-        if cfg.protocol == "nominal":
-            axes[1, 1].plot(group["nominal_T_K"], group["hs_fraction"], style, label=label)
-        else:
-            axes[1, 1].plot(group["R_red_A"], group["hs_fraction"], style, label=label)
-    axes[0, 0].set(xlabel="R_red (Å)", ylabel="r_Fe–N (Å)", title="Contracción: enlace frente a red")
-    axes[0, 1].set(xlabel="R_red (Å)", ylabel="HS = 1; LS = 0 (media MC)", title="Estado de cada Fe")
-    axes[1, 0].set(xlabel="R_red (Å)", ylabel="E total (eV)", title="Energía de la trayectoria")
-    axes[1, 1].set(xlabel="Temperatura nominal (K)" if cfg.protocol == "nominal" else "R_red (Å)",
-                   ylabel="Fracción HS", title="Barridos inversos y velocidades")
-    for ax in axes.flat:
-        ax.legend(fontsize=7)
-    _save(fig, out / "trajectories.png")
+    axes[1].plot(radii, ligand_field(radii, cfg))
+    if r_c is not None:
+        axes[1].axvline(r_c, color="gray", linestyle=":")
+    axes[1].set(
+        xlabel="Fe–N (Å)", ylabel="Dq (cm⁻¹)", title="Campo de ligandos Dq(r) ∝ r⁻⁵"
+    )
 
-    if cfg.protocol == "nominal":
-        fig, ax = plt.subplots(figsize=(8, 5))
-        for (speed, direction), group in averaged.groupby(["speed", "direction"]):
-            for i in range(1, cfg.N_Fe + 1):
-                ax.plot(group["nominal_T_K"], group[f"r{i}_A"],
-                        label=f"{speed} {direction} Fe{i}")
-        ax.set(xlabel="Temperatura nominal (K), no termodinámica", ylabel="Fe–N (Å)")
-        ax.legend(fontsize=8)
-        _save(fig, out / "nominal_distance.png")
+    axes[2].plot(radii, delta_o(radii, cfg))
+    if r_c is not None:
+        axes[2].axvline(r_c, color="gray", linestyle=":")
+    axes[2].set(
+        xlabel="Fe–N (Å)", ylabel="Δo = 10·Dq (cm⁻¹)", title="Desdoblamiento octaédrico"
+    )
 
-    if cfg.geometry == "six_radial":
-        fig, axes = plt.subplots(cfg.N_Fe, 1, figsize=(9, 4 * cfg.N_Fe), squeeze=False)
-        for i, ax in enumerate(axes[:, 0], 1):
-            for j in range(1, 7):
-                subset = averaged[(averaged["speed"] == "slow") &
-                                  (averaged["direction"] == "cooling")]
-                ax.plot(subset["R_red_A"], subset[f"fe{i}_n{j}_A"],
-                        label=f"N{j} {'ecuatorial' if j <= 4 else 'axial'}")
-            ax.set(xlabel="R_red (Å)", ylabel="Distancia Fe–N (Å)",
-                   title=f"Fe{i}: seis enlaces, enfriamiento lento (media entre réplicas)")
-            ax.legend(fontsize=8, ncol=2)
-        _save(fig, out / "ligand_distances.png")
-
-    fig, ax = plt.subplots(figsize=(8, 5))
-    example = pd.DataFrame(convergence)
-    example = example[(example["speed"] == "slow") & (example["replica"] == 0) &
-                      (example["direction"] == "cooling") & (example["step"] == 0)]
-    ax.plot(example["sweep"], example["energy_eV"], marker=".")
-    ax.set(xlabel="Barridos MC en el primer paso", ylabel="E total (eV)",
-           title="Convergencia: ejemplo (todos los pasos en convergence.csv)")
-    _save(fig, out / "convergence.png")
-
-
-def _save(fig, path: Path) -> None:
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(out / "surfaces.png", dpi=160)
+    plt.close(fig)
+
+
+def _plot_scan(
+    out: Path, cfg: Config, equilibrium: list[dict], samples: list[dict]
+) -> None:
+    """Figura 2: fracción HS del barrido (referencia analítica frente a Monte Carlo)."""
+    fig, ax = plt.subplots(figsize=(8, 5))
+    if cfg.protocol == "distance":
+        x_eq = [row["r_A"] for row in equilibrium]
+        x_mc = [row["r_A"] for row in samples]
+        ax.set(
+            xlabel="Distancia Fe–N (Å)",
+            title="Fracción HS vs distancia (el campo de ligandos provoca el cruce)",
+        )
+    else:
+        x_eq = [row["T_K"] for row in equilibrium]
+        x_mc = [row["T_K"] for row in samples]
+        ax.set(
+            xlabel="Temperatura (K)",
+            title="Fracción HS vs temperatura (centro aislado, cruce suave)",
+        )
+
+    ax.plot(
+        x_eq,
+        [row["hs_fraction"] for row in equilibrium],
+        "-",
+        color="black",
+        linewidth=2,
+        label="Analítico (2 niveles)",
+    )
+    ax.plot(
+        x_mc,
+        [row["hs_fraction"] for row in samples],
+        "o",
+        markersize=3,
+        color="crimson",
+        label="Monte Carlo (T finita)",
+    )
+    ax.set(ylabel="Fracción HS", ylim=(-0.05, 1.05))
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out / "crossover.png", dpi=160)
     plt.close(fig)

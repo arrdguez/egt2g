@@ -1,0 +1,20 @@
+{
+  "Dq0": 1500.0,
+  "r0": 2.0,
+  "P": 20000.0,
+  "r_min": 1.80,
+  "r_max": 2.40,
+  "protocol": "temperature",
+  "R_start": 2.40,
+  "R_end": 1.80,
+  "delta_R": 0.005,
+  "T_fixed": 300.0,
+  "r_fixed": 2.17,
+  "T_start": 400.0,
+  "T_end": 0.0,
+  "delta_T": 4.0,
+  "equilibration": 2000,
+  "mc_steps": 20000,
+  "replicas": 4,
+  "seed": 2026
+}
